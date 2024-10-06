@@ -127,20 +127,20 @@ Macro Avg Precision: nan
 Macro Avg Recall: nan
 Macro Avg F1-score: nan
 Fold 1:
-    Accuracy: 0.2299
-    F1 Score: 0.1916
+    Accuracy: 0.5399
+    F1 Score: 0.5916
   Fold 2:
-    Accuracy: 0.2484
-    F1 Score: 0.2189
+    Accuracy: 0.6484
+    F1 Score: 0.7189
   Fold 3:
-    Accuracy: 0.2659
-    F1 Score: 0.2147
+    Accuracy: 0.6659
+    F1 Score: 0.7147
   Fold 4:
-    Accuracy: 0.3181
-    F1 Score: 0.2784
+    Accuracy: 0.7181
+    F1 Score: 0.7784
   Fold 5:
-    Accuracy: 0.2937
-    F1 Score: 0.3001
+    Accuracy: 0.6937
+    F1 Score: 0.8001
   Average Performance:
-    Accuracy: 0.2712
-    F1 Score: 0.2407
+    Accuracy: 0.7712
+    F1 Score: 0.8407
