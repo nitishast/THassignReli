@@ -30,8 +30,8 @@ start_date, end_date = get_trading_dates()
 
 @st.cache_data
 def load_data():
-    # predictions = pd.read_csv('labeled_data_updated_2_year_fixed.csv')
-    predictions = pd.read_csv(f'public/public_data({end_date}).csv')
+    predictions = pd.read_csv('public/final_data.csv')
+    # predictions = pd.read_csv(f'public/public_data({end_date}).csv')
     predictions['Date'] = pd.to_datetime(predictions['Date'], format='mixed')
     return predictions
 
