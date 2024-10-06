@@ -62,7 +62,7 @@ NEWRELIC2/
 ## Setup and Installation
 1. Clone the repository
 2. Install dependencies: `pip install -r requirements.txt`
-3. Run `main.py` to execute the pipeline
+3. Run `streamlit run homepage.py` to execute the pipeline and start the UI
 
 ## Usage
 - Use notebooks in the `notebook/` directory for exploratory analysis
