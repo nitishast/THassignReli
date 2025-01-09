@@ -1,3 +1,88 @@
+Okay, let's break down the analysis of these two Databricks job tasks: job-sl-uc-uhgmyuhcprod and job-sl-uc-uhgmyuhcprod-aggregate-level.
+
+Task: job-sl-uc-uhgmyuhcprod
+
+Job Trigger Types: The job is triggered either manually or by a cron schedule. Manual triggers are more frequent (232) than cron triggers (135).
+
+Action Names: Most of the job runs are either starting (runStart: 193) or succeeding (runSucceeded: 158). There are only 16 failed runs (runFailed).
+
+Event Errors: Most of the entries indicate the job is "In run" (193), which aligns with the runStart action. A smaller number (16) report a "Workload failed" error. This aligns with the failed runs count.
+
+Error Messages: This column provides detailed reasons for the failures. We can categorize them into a few distinct error types:
+
+Delta Merge Conflict: A DeltaUnsupportedOperationException indicates issues with Delta table merges where multiple source rows match the same target row, leading to ambiguity. This occurs 8 times.
+
+Shuffle Fetch Failures: Multiple errors describe ShuffleMapStage failures due to FetchFailedException, often followed by java.nio.channels.ClosedChannelException. This indicates problems with data retrieval during the shuffle stage of Spark processing. This happens 6 times.
+
+Job Start Issues: An Exception during jobStart() occurs, caused by a subjob being in a started or completed state. This seems like a synchronization error when the job is trying to begin. This occurs once
+
+File Not Found: A SparkFileNotFoundException related to a missing parquet file that is referenced by the transaction log. This typically arises when files are manually deleted, rather than using table delete commands. This occurs once.
+
+Connection Closed Exception A java.io.IOException: Connection from ... closed that resulted in the job failing. This occurs twice.
+
+Key Observations for job-sl-uc-uhgmyuhcprod:
+
+Recurring Shuffle Failures: The ShuffleMapStage errors and their underlying ClosedChannelException suggest potential issues with the Spark cluster's networking or resource allocation. These failures are not isolated and happen multiple times.
+
+Delta Merge Issues: The DeltaUnsupportedOperationException highlights the need to investigate the data being merged and potentially add pre-processing logic to avoid conflicting matches.
+
+Manual Trigger Dominance: The fact that there are almost twice as many manual triggers as cron suggests that this job is not running on an automated cadence, this would mean the data is being manually pushed, and that human interaction is common.
+
+Overall Job Stability: The high number of successful runs suggests the job, for the most part, is stable. It should be noted the failed jobs are caused by multiple different errors.
+
+Task: job-sl-uc-uhgmyuhcprod-aggregate-level
+
+Job Trigger Types: Similar to the previous task, this one is also mainly triggered manually (465). However, it also has cron (50) and repair (4) triggers, implying that there may be a more structured schedule for this task.
+
+Action Names: Run starts (279) and successful runs (236) are the most common, with only 4 failed runs.
+
+Event Errors: 279 jobs were "In run", 3 jobs failed with "workload failure", and one failed due to an Azure quota exception.
+
+Error Messages: The error messages are varied:
+
+Azure Quota Exceeded: One run failed because the cluster was terminated due to an Azure quota limit (specifically on standardEDv4Family cores).
+
+Array Index Out of Bounds: Two failures have an ArrayIndexOutOfBoundsException.
+
+Job Fail Exception: One job failed during the jobFail() process because a key could not be found in the response.
+
+Key Observations for job-sl-uc-uhgmyuhcprod-aggregate-level:
+
+Azure Quota Issue: This is a critical error, as it points to a resource limitation. The cluster was terminated because the job tried to use more compute resources than were available. This error is important to resolve to avoid future job failures.
+
+Array Index Exception: This points to a bug in the job logic that is causing the index error, this is something that needs to be looked into by the engineering team.
+
+Job Failure Exception: The exception thrown by the job failure function, is unusual and can also point to an issue with job logic.
+
+Comparison and Recommendations
+
+Trigger Patterns: Both jobs are heavily reliant on manual triggers. If they are meant to run on a schedule, the cron configuration should be reviewed. The presence of "repair" triggers on the aggregate job implies that the job has a higher chance of needing fixing after failures.
+
+Error Variety: Both jobs experience failures for different reasons. The standard job (job-sl-uc-uhgmyuhcprod) has more Spark-related shuffle issues, while the aggregate job (job-sl-uc-uhgmyuhcprod-aggregate-level) has a quota issue and various logic errors, highlighting that each job has unique issues.
+
+Prioritization:
+
+job-sl-uc-uhgmyuhcprod:
+
+Investigate the shuffle failures, paying close attention to Spark networking and resource configuration, also implement better error handling.
+
+Review the delta merge logic to handle conflicting source rows. It can be beneficial to add a pre-processing step before the merge, or add logic that merges on a different join condition.
+
+Consider revisiting the usage of manual job triggers if automation is desired.
+
+job-sl-uc-uhgmyuhcprod-aggregate-level:
+
+Immediately address the Azure quota issue by requesting an increase or optimizing resource usage.
+
+Debug the ArrayIndexOutOfBoundsException to fix the underlying data or logic issues.
+
+Investigate why the job fails when a key is not found during jobFail().
+
+In summary: Both tasks appear to be running with a mixture of success and failure. The individual errors are distinct, and indicate that a variety of engineering changes need to be implemented to improve the reliability of the jobs.
+
+Let me know if you have any other questions or require further analysis!
+
+
 requests
 bs4 
 yfinance
