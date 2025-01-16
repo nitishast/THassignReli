@@ -1,0 +1,539 @@
+service.scala
+
+package com.optum.digicom.digital.clickstream_ingestion
+
+import java.text.SimpleDateFormat
+
+import com.optum.digicom.digital.queryframework.sdrloader
+import com.optum.digicom.digital.queryframework.imdmenrichment
+import org.apache.spark.sql.{DataFrame, SparkSession}
+import com.optum.digicom.digital.queryframework.custloader
+import com.optum.digicom.digital.queryframework.qgenerator
+//import delta.QuickstartUtils._
+
+import scala.collection.JavaConversions._
+import org.apache.spark.sql.SaveMode._
+//import delta.DataSourceReadOptions._
+//import delta.DataSourceWriteOptions._
+//import delta.config.HoodieWriteConfig._
+import com.optum.digicom.digital.queryframework.decryptor
+import com.optum.digicom.digital.queryframework.qproducer
+import com.optum.digicom.digital.queryframework.aggregation
+import com.optum.digicom.commonframework.functions.{CallJobEnd, CallJobFail, CallJobStart}
+import com.optum.digicom.commonframework.models.{JobEndRequestBody, JobFailRequestBody, JobStartRequestBody}
+import org.apache.log4j.Logger
+
+
+object Service {
+
+
+  var utils = new Utils
+
+
+  def main(args: Array[String]): Unit = {
+
+
+ //["CONTROL","abfss://dataassets-lake@daodaprdlake.dfs.core.windows.net/oda/uhglawwappprod","/2021/*/*/*","abfss://oda-uhglawwappprod@stodaoncnprd001.dfs.core.windows.net/configs/custenrich.json","prd","odauhglawwappprod","sourabh.jain@optum.com","oda-uhglawwappprod","N","uhglawwappprod","N"]
+    val loadType = args(0)
+    val basePath = args(1)
+    val incrementalBeginTime = args(2)
+    val configFile = args(3)
+    val env = args(4)
+    var jobName = args(5)
+    val notificationEmail: List[String] = args(6).split(",").map(_.trim).toList
+    val container = args(7)
+    val testRun = args(8)
+    val rsid = args(9)
+    val aggregationRunFlag = args(10) // Y or N
+    val dataReprocessFlag = args(11)
+    val dashBoardFlag = args(12)
+    val application = args(13)
+    val product = args(14)
+
+    var startPartition = ""
+    var endPartition = ""
+    var backtrackingDays = 0
+    var year_filter = ""
+    var month_filter = ""
+    var day_filter = ""
+
+    if(loadType == "REPROCESS"){
+      year_filter = args(15)
+      month_filter = args(16)
+      startPartition = args(17) // "05"
+      endPartition = args(18) // "12"
+    }
+
+    if(loadType == "NULL_REPROCESS"){
+      startPartition = args(15) // partition_date=2018-10-02
+      endPartition = args(16)
+    }
+
+    if(loadType == "NULL_REPROCESS_INCR"){
+//      startPartition = args(15) // partition_date=2018-10-02
+//      endPartition = args(16)
+      backtrackingDays = args(15).toInt
+    }
+
+    if(loadType == "CONTROL"){
+      year_filter = args(15)
+      month_filter = args(16)
+      day_filter = args(17)
+    }
+   // val aggregationJsonPath = args(13)
+
+    val imdmDatabase = "prod_oco_data_analytics.membership"
+    val imdmTable = "sl_imdm_masteridentifiers"
+
+//    val application = "ODAON"
+//
+//
+//    var product = ""
+
+//    if(loadType == "AGGREGATION"){
+//      product = "VisitLevel"
+//    } else {
+//      product = "HitLevel"
+//    }
+    var testflag = false
+    if(testRun.toLowerCase() == "y"){
+      testflag = true
+    }
+
+    if(aggregationRunFlag == "Y"){
+      jobName = jobName + "_AGGREGATION"
+    }
+    val subJobName = jobName + "_DRIVER"
+//    val projectLocation = s"abfss://${container}@stodaoncn${env}001.dfs.core.windows.net/"
+    var projectLocation = ""
+    if(rsid != "uhgmyoptum.mobile.app.prod"){
+      projectLocation = s"abfss://common@stdiganscmn${env}001.dfs.core.windows.net/artifacts/co-dbr-clickstream-configs/${rsid}/"
+    } else{
+      projectLocation = s"abfss://common@stdiganscmn${env}001.dfs.core.windows.net/artifacts/co-dbr-clickstream-configs/uhgmyoptummobileappprod/"
+    }
+
+
+    val spark = SparkSession.builder.getOrCreate()
+    val logger = Logger.getLogger(jobName)
+
+    if(jobName!="Scalatest"){
+      // utils.jobStart(spark,env, jobName ,subJobName ,"",application ,product ,notificationEmail ,"Daily",testflag, logger)
+    }
+
+          try {
+
+            spark.conf.set("spark.sql.analyzer.maxIterations", "1000")
+            spark.conf.set("spark.databricks.adaptive.autoOptimizeShuffle.enabled", true)
+
+            var pullExtractTs = ""
+            if(loadType == "INCR"){
+              val  (incrflag, incrJobid, incrSubJobid, histTime, incrErrorCd, incrErrorMsg) = utils.getIncrTimestamp(spark,jobName,subJobName, logger, env)
+              if(incrflag){
+                pullExtractTs = histTime
+
+              } else {
+                throw new Exception("Failed while pull extract TS")
+              }
+            }
+
+            logger.info("Pull Extract Ts : "+ pullExtractTs)
+
+
+           var  maxExtractTs = ""
+           if(loadType == "AGGREGATION"){
+             var hit_data = spark.emptyDataFrame
+             val aggregationJson = args(15)
+             val customRun = args(16) // H, C, I
+             val customRunPartitionDateStartPattern = args(17)
+             val customRunPartitionDateEndPattern = args(18)
+             val backTrackingDays = args(19).toInt
+             val writeMode = args(20)
+             val comparisonColumn = args(21)
+
+
+             aggregation.Service.serviceCall(aggregationJson, hit_data, customRun, customRunPartitionDateStartPattern, customRunPartitionDateEndPattern, backTrackingDays, writeMode, comparisonColumn, dashBoardFlag, rsid, configFile)
+           } else {
+
+             maxExtractTs =  Start(spark, loadType, basePath, configFile, incrementalBeginTime,imdmDatabase , imdmTable, jobName, rsid, aggregationRunFlag,pullExtractTs, dataReprocessFlag, dashBoardFlag , startPartition, endPartition, backtrackingDays, year_filter, month_filter, day_filter)
+
+           }
+
+
+
+            logger.info("Max Extract Ts : " + maxExtractTs)
+            if(jobName!="Scalatest"){
+              // utils.jobEnd(spark,env,jobName,subJobName,maxExtractTs,"",notificationEmail,"Daily",projectLocation , testflag ,logger, "Y")
+            }
+            }
+             catch {
+                      case e: Exception =>
+                          // utils.jobFail(spark, env, jobName ,subJobName, "", e.getMessage, notificationEmail ,"Daily", projectLocation , testflag ,logger)
+                        throw e
+                    }
+  }
+
+  def Start(spark : SparkSession , loadType : String , basePath : String ,configFile : String,  incrementalBeginTime : String,
+            imdmDatabase : String , imdmTable : String ,jobName : String, rsid : String, aggregationRunFlag : String,pullExtractTs : String, dataReprocessFlag: String , dashBoardFlag : String , startPartition : String, endPartition : String, backTrackingDays : Int,
+            year_filter: String, month_filter: String, day_filter: String): String ={
+
+    var mytableSnapshotDF : DataFrame = spark.emptyDataFrame
+
+    var startDate = ""
+    var endDate = ""
+
+
+    if(loadType == "FULL"){
+
+      mytableSnapshotDF = spark.read.format("delta").load(basePath)
+
+    } else if (loadType == "CONTROL"){
+
+//      mytableSnapshotDF = spark.read.format("delta").load(basePath).filter(incrementalBeginTime)
+
+      if(year_filter!="" & month_filter != "" & day_filter != ""){
+        println("Year,Month & Day Used")
+        mytableSnapshotDF = spark.read.format("delta").load(basePath).filter(year_filter).filter(month_filter).filter(day_filter)
+      }
+
+      if(year_filter!="" & month_filter != "" & day_filter == ""){
+        println("Year,Month Used")
+        mytableSnapshotDF = spark.read.format("delta").load(basePath).filter(year_filter).filter(month_filter)
+      }
+
+      if(year_filter!="" & month_filter == "" & day_filter == ""){
+        println("Year Used")
+        mytableSnapshotDF = spark.read.format("delta").load(basePath).filter(year_filter)
+      }
+      println("DataFrameCount")
+      println(mytableSnapshotDF.count())
+
+    } else if(loadType == "INCR") {
+
+      mytableSnapshotDF = spark.read.format("delta").load(basePath).filter(s"delta_commit_time >= '" + pullExtractTs + "'")
+
+    } else if (loadType == "REPROCESS"){
+
+
+      mytableSnapshotDF = spark.read.format("delta").load(basePath).filter(year_filter).filter(month_filter).filter(s"day >= '" + startPartition + "'").filter(s"day <= '" + endPartition + "'")
+
+
+    } else if (loadType == "NULL_REPROCESS"){
+
+      mytableSnapshotDF = spark.read.format("delta").load(basePath)
+
+    } else if (loadType == "NULL_REPROCESS_INCR"){
+
+      mytableSnapshotDF = spark.read.format("delta").load(basePath + incrementalBeginTime)
+
+      val t1 = System.currentTimeMillis
+      val t2: Long = 1000*60*60*24*backTrackingDays
+      val t3: Long = 1000*60*60*24*1
+      val t4 = t1 - t2
+      val timeFormat = new SimpleDateFormat("yyyy-MM-dd")
+      startDate = timeFormat.format(t4)
+      endDate = timeFormat.format(t1)
+    }
+
+
+
+    mytableSnapshotDF.createOrReplaceTempView("hit_data_view")
+
+    var extractTs = ""
+    if(loadType=="FULL" || loadType=="CONTROL" || loadType=="INCR" || loadType=="REPROCESS"){
+
+      val incrCol = "delta_commit_time"
+      val extractTsdf = spark.sql(s"""select cast(max($incrCol) as String) as incrcol from hit_data_view""")
+      extractTs = extractTsdf.select("incrcol").first.getString(0)
+      spark.conf.set("spark.sql.session.timeZone", "CST")
+      qproducer.Service.ingestDf(rsid,"hit_data_view", configFile, imdmDatabase , imdmTable ,jobName, aggregationRunFlag, dataReprocessFlag, dashBoardFlag, loadType,"","")
+
+    } else if(loadType=="NULL_REPROCESS"){
+
+      val incrCol = "delta_commit_time"
+      val extractTsdf = spark.sql(s"""select cast(max($incrCol) as String) as incrcol from hit_data_view""")
+      extractTs = extractTsdf.select("incrcol").first.getString(0)
+      spark.conf.set("spark.sql.session.timeZone", "CST")
+      qproducer.Service.ingestDf(rsid,"hit_data_view", configFile, imdmDatabase , imdmTable ,jobName, aggregationRunFlag, dataReprocessFlag, dashBoardFlag, loadType,startPartition,endPartition)
+
+
+    } else if(loadType=="NULL_REPROCESS_INCR"){
+
+      val incrCol = "delta_commit_time"
+      val extractTsdf = spark.sql(s"""select cast(max($incrCol) as String) as incrcol from hit_data_view""")
+      extractTs = extractTsdf.select("incrcol").first.getString(0)
+      spark.conf.set("spark.sql.session.timeZone", "CST")
+      qproducer.Service.ingestDf(rsid,"hit_data_view", configFile, imdmDatabase , imdmTable ,jobName, aggregationRunFlag, dataReprocessFlag, dashBoardFlag, loadType,startDate,endDate)
+
+
+    }
+
+    return extractTs
+
+
+  }
+
+  }
+
+--
+utils.scala
+
+
+package com.optum.digicom.digital.clickstream_ingestion
+
+import java.io.FileNotFoundException
+import java.text.SimpleDateFormat
+import java.util.{Date, TimeZone}
+
+import org.apache.spark.sql.{DataFrame, SparkSession}
+import org.apache.spark.sql._
+import com.databricks.dbutils_v1.DBUtilsHolder.dbutils
+import org.apache.log4j.Logger
+import com.optum.digicom.commonframework.functions._
+import com.optum.digicom.commonframework.models.{JobEndRequestBody, JobFailRequestBody, JobStartRequestBody}
+
+
+
+class Utils{
+
+
+  def setSparkConfigs(spark: SparkSession,
+                      logger : Logger,
+                      secret: String,
+                      applicationId : String) : Boolean = {
+    logger.info("Setting Spark Configs : Starting")
+    spark.sparkContext.hadoopConfiguration.set("fs.azure.account.key", secret)
+    spark.sparkContext.hadoopConfiguration.set("fs.azure.account.auth.type", "OAuth")
+    spark.sparkContext.hadoopConfiguration.set("fs.azure.account.oauth.provider.type", "org.apache.hadoop.fs.azurebfs.oauth2.ClientCredsTokenProvider")
+    spark.sparkContext.hadoopConfiguration.set("fs.azure.account.oauth2.client.id",applicationId )
+    spark.sparkContext.hadoopConfiguration.set("fs.azure.account.oauth2.client.secret", secret)
+    spark.sparkContext.hadoopConfiguration.set("fs.azure.account.oauth2.client.endpoint", "https://login.microsoftonline.com/db05faca-c82a-4b9d-b9c5-0f64b6755421/oauth2/token")
+    logger.info("Setting Spark Configs : Finished")
+    true
+  }
+
+
+  def getDBUtilsSecret(scope : String, key : String) : String = {
+    dbutils.secrets.get(scope, key)
+  }
+
+
+
+  def curr_time(): String = {
+    val date = new Date
+    val currTS = new SimpleDateFormat("YYYY-MM-dd HH:mm:ss")
+    currTS.setTimeZone(TimeZone.getTimeZone("CST"))
+    currTS.format(date)
+  }
+
+  // JobTracking Functions
+
+  def getIncrTimestamp(spark : SparkSession,
+                       jobName : String,
+                       subJobName : String,
+                       logger : Logger,
+                      env: String) : (Boolean, String, String, String, String, String) = {
+
+    var incrflag = false
+    var incrJobid = ""
+    var incrSubJobid = ""
+    var incrExtractTs = ""
+    var incrErrorCd = ""
+    var incrErrorMsg = ""
+
+    if (jobName != "Scalatest") {
+      val getIncrTimeOut =
+      // (incrflag, incrJobid, incrSubJobid, incrExtractTs, incrErrorCd, incrErrorMsg) =
+        GetIncremental.getIncrTime(spark,env,jobName,subJobName)
+      incrflag = getIncrTimeOut._1
+      incrJobid = getIncrTimeOut._2
+      incrSubJobid = getIncrTimeOut._3
+      incrExtractTs = getIncrTimeOut._4
+      incrErrorCd = getIncrTimeOut._5
+      incrErrorMsg = getIncrTimeOut._6
+    }
+
+    // var histTime = incrExtractTs
+    var histTime = "20241202081603"
+
+    println("incrflag")
+    println(incrflag)
+    println(histTime)
+//    if (!incrflag) {
+//      val extractTs = "1900-01-01 00:00:00"
+//
+//      val destTimeFormat = ""
+//
+//      histTime = getCustomDateTime(extractTs, destTimeFormat, "yyyy-MM-dd HH:mm:ss")
+//      logger.error(s"getIncrTime Not Present")
+//    }
+
+    (incrflag, incrJobid, incrSubJobid, histTime, incrErrorCd, incrErrorMsg)
+
+  }
+  // JobTracking Functions
+  def jobStart(spark : SparkSession,
+               env: String,
+               jobName : String,
+               subJobName : String,
+               preRecCount : String,
+               applicationName: String,
+               product: String,
+               emails : List[String],
+               frequency : String,
+               testRun : Boolean,
+               logger : Logger
+              ) : (Boolean, String, String, String, String) = {
+
+    //    var jobStart = new CallJobStart
+
+    var startFlag = false
+    var jobId = ""
+    var subJobId = ""
+    var errorCode = ""
+    var errorMsg = ""
+
+    if (jobName != "Scalatest") {
+      val jobStartRequest = JobStartRequestBody(
+        jobName,
+        subJobName,
+        applicationName,
+        product,
+        preRecCount,
+        ""
+      )
+
+      val jobStartOut =
+        CallJobStart.jobStart(
+          spark,
+          env,
+          jobStartRequest,
+          emails,
+          "Job Started",
+          frequency,
+          testRun)
+      startFlag = jobStartOut._1
+      jobId = jobStartOut._2
+      subJobId = jobStartOut._3
+      errorCode = jobStartOut._4
+      errorMsg =  jobStartOut._5
+    }
+
+    if (!startFlag) {
+      logger.error(s"Error calling jobStart for ${jobName}")
+      logger.error(s"${errorCode} for jobID ${jobId}, subJobID ${subJobId}")
+      logger.error(s"${errorCode} : ${errorMsg}")
+      throw new Exception(s"Error calling jobStart ${jobId} : ${subJobId}")
+    }
+
+    (startFlag, jobId, subJobId, errorCode, errorMsg)
+
+  }
+
+  def jobEnd(spark : SparkSession,env : String,jobName : String,subJobName : String,extractts : String,postRecCount : String,emails : List[String], frequency : String, projectLocation : String, testRun : Boolean, logger: Logger, markCompleted : String = "N") : (Boolean, String, String, String, String) = {
+
+    //    val jobEnd = new CallJobEnd
+
+    var endFlag = false
+    var jobId = ""
+    var subJobId = ""
+    var errorCode = ""
+    var errorMsg = ""
+
+    if (subJobName != "Scalatest") {
+
+      val jobEndRequest = JobEndRequestBody(jobName,subJobName,extractts,postRecCount,markCompleted)
+
+      val jobEndOut = {CallJobEnd.jobEnd(spark,env,jobEndRequest,emails,"Job Completed",frequency,testRun,projectLocation)}
+      endFlag = jobEndOut._1
+      jobId = jobEndOut._2
+      subJobId = jobEndOut._3
+      errorCode = jobEndOut._4
+      errorMsg = jobEndOut._5
+    }
+
+    if (!endFlag) {
+
+      logger.error(s"Error calling jobEnd for ${subJobName}")
+      logger.error(s"${errorCode} for jobID ${jobId}, subJobID ${subJobId}")
+      logger.error(s"${errorCode} : ${errorMsg}")
+      throw new Exception(s"Error calling jobEnd ${jobId} : ${subJobId}")
+
+    }
+
+    (endFlag, jobId, subJobId, errorCode, errorMsg)
+
+  }
+
+
+  def jobFail(spark : SparkSession,
+              env: String,
+              jobName: String,
+              subJobName : String,
+              rejRecCount : String,
+              errMsg : String,
+              email : List[String],
+              frequency : String,
+              projectLocation : String,
+              testRun: Boolean,
+              logger: Logger) : (Boolean, String, String, String, String) = {
+
+    //    val jobFail = new CallJobFail
+
+    var failFlag = false
+    var jobId = ""
+    var subJobId = ""
+    var errorCode = ""
+    var errorMsg = ""
+
+
+    if (subJobName != "Scalatest") {
+
+      val jobFailRequest = JobFailRequestBody(
+        jobName,
+        subJobName,
+        rejRecCount,
+        subJobName,
+        errMsg
+      )
+
+      val jobFailOut = {
+
+        CallJobFail.jobFail(
+          spark,
+          env,
+          jobFailRequest,
+          email,
+          "Job Failed",
+          frequency,
+          testRun ,
+          projectLocation)
+      }
+      failFlag = jobFailOut._1
+      jobId = jobFailOut._2
+      subJobId = jobFailOut._3
+      errorCode = jobFailOut._4
+      errorMsg = jobFailOut._5
+
+    }
+
+    if (!failFlag && jobName != "Scalatest") {
+
+      logger.error(s"Error calling jobEnd for ${subJobName}")
+      logger.error(s"${errorCode} for jobID ${jobId}, subJobID ${subJobId}")
+      logger.error(s"${errorCode} : ${errorMsg}")
+      throw new Exception(s"Error calling jobFail ${jobId} : ${subJobId}")
+    }
+
+    (failFlag, jobId, subJobId, errorCode, errorMsg)
+  }
+
+  def getCustomDateTime(dateVal: String, dateTimeFormatDestination: String, dateTimeFormatSource: String): String = {
+    val dateFormatSource = new SimpleDateFormat(dateTimeFormatSource)
+    val pardt = dateFormatSource.parse(dateVal)
+    val dateFormatDestination = new SimpleDateFormat(dateTimeFormatDestination)
+    dateFormatDestination.format(pardt)
+  }
+
+
+
+}
