@@ -1,0 +1,38 @@
+Here’s a polished and structured version of your draft:
+
+---
+
+**Subject:** Updates on Spark Job Optimization Work  
+
+Hi Nirmal,  
+
+I hope you’re doing well. I wanted to share an update on what I’ve been working on since our last discussion:  
+
+1. **Anomaly Detection**  
+   As discussed in our previous meeting, the anomaly detection study did not yield fruitful results. Following your suggestion, I explored flagging jobs with unusually long durations. While no direct mechanism exists to identify these cases, Srikar suggested filtering out successfully executed jobs as a workaround. He also agreed to share job IDs for such cases, which can then be excluded from future analyses.  
+
+2. **Job Execution Time Prediction**  
+   I started building a regression ML model to predict job execution times, specifically aiming to forecast if upcoming jobs would exceed one hour. The idea was to enable proactive actions, such as scaling up cluster resources. However, the model exhibited high error rates due to limited feature availability.  
+   - **Challenges**: The two primary factors affecting job execution time are the number of rows processed and cluster size. Since the cluster size is constant and the number of rows processed is not logged, the model lacked the key features required to accurately model the relationship. The current logs mainly include transactional data like workspace and errors, which are insufficient for this use case.  
+   - **Next Steps**: Despite this, I believe the concept is still viable if we can log critical features like the number of rows processed.  
+
+3. **MyUHC.com Job Analysis**  
+   I reviewed error trends for MyUHC.com jobs over the past six months. The analysis revealed that these jobs are running as expected, with only two short issue periods:  
+   - **November**: Five days of issues.  
+   - **August**: Three days of issues.  
+   I shared this finding with Pradeep, who had coincidentally been working on a similar analysis. We are collaborating to cross-verify and consolidate our insights.  
+
+4. **Recent Job Failure Investigation**  
+   Yesterday, Pradeep observed multiple consecutive job failures and requested a root cause analysis. I investigated the errors and identified the underlying issues. I plan to share a detailed document shortly, which outlines actionable recommendations. Initial findings suggest significant room for improvement in the Scala scripts used.  
+
+### **Future Direction**  
+My primary goal remains to identify and address bottlenecks through analytics and to explore potential applications of Machine Learning or Generative AI. If you have any specific use cases in mind, I would be excited to explore them further and provide support.  
+
+Looking forward to your feedback and suggestions.  
+
+Best regards,  
+[Your Name]  
+
+---  
+
+This version ensures clarity, professionalism, and a structured flow while presenting your updates and ideas. Let me know if you’d like any changes!
